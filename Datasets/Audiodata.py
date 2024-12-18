@@ -258,7 +258,6 @@ class Audiodataset(Dataset):
             axs[2].set_ylabel('wave')
 
         plt.tight_layout()
-        plt.show()
         
 
 
