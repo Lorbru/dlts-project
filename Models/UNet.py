@@ -2,10 +2,10 @@ import torch.nn as nn
 
 class UNet(nn.Module):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self):
         #TODO
+        return
 
-    def __forward__(self, X):
+    def forward(self, x):
         #TODO
         return

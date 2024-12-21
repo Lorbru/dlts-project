@@ -29,7 +29,7 @@ class Audiodataset(Dataset):
     -- Récupération d'un jeu de données audio sous la forme de tenseur, (sous forme d'onde ou spectrogramme)
     """
 
-    def __init__(self, set='train_small', spectrogram=False, snr_filter=None, resample=None, padding=False, getitem='all'):
+    def __init__(self, set='train_small', spectrogram=False, snr_filter=None, resample_n_points=None, padding=False, getitem='all'):
         
         # Chemin vers le jeu de données chargé
         self.root_dir = 'Data/' + set
@@ -37,7 +37,7 @@ class Audiodataset(Dataset):
 
         # Propriétés
         self.__data = []                          # noms des fichiers collectés
-        self.__resample = resample                # resample des audios (optionnel, par défaut 8000Hz)
+        self.__resample = resample_n_points       # resample des audios pour obtenir un échantillon de n points (10sec * fe, par défaut 10*8000Hz)
         self.__return_spectrogram = spectrogram   # retourne les données : True = en image temps/fréquence (spectrogramme) / False = en forme d'onde (wave)
         self.__n_fft = DEFAULT_NFFT               # taille de la fenêtre de transformation temps/fréquence
         self.__hop_length = DEFAULT_HL            # pas de temps entre deux fenêtre successives
@@ -87,7 +87,7 @@ class Audiodataset(Dataset):
 
         # rééchantillonage éventuel
         if self.__resample != None and self.__resample > 0 :
-            resampler = torchaudio.transforms.Resample(orig_freq=sr_input, new_freq=self.__resample)
+            resampler = torchaudio.transforms.Resample(orig_freq=10*sr_input, new_freq=self.__resample) # x10 (audio duration)
             input = resampler(input)
             if self.__getitem != 'voice' : noise = resampler(noise)
             if self.__getitem != 'noise' : voice = resampler(voice)
@@ -123,9 +123,10 @@ class Audiodataset(Dataset):
 
         snr = sample_dic['snr']
         
-        if self.__getitem == 'all' :     sample = (input.unsqueeze(0), voice.unsqueeze(0), noise.unsqueeze(0), snr, sr_input)
-        elif self.__getitem == 'voice' : sample = (input.unsqueeze(0), voice.unsqueeze(0))
-        elif self.__getitem == 'noise' : sample = (input.unsqueeze(0), noise.unsqueeze(0))
+        if self.__getitem == 'all' :     sample = (input, voice, noise, snr, sr_input)
+        elif self.__getitem == 'concatVN' : sample = (input, torch.cat([voice, noise], dim=0))
+        elif self.__getitem == 'voice' : sample = (input, voice)
+        elif self.__getitem == 'noise' : sample = (input, noise)
         
         return sample
     
