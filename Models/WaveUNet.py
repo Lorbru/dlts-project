@@ -124,7 +124,7 @@ class WaveUNet(nn.Module):
     
 
     @staticmethod
-    def trainModel(dataset, n_epochs=20, batch_size=16, learning_rate=0.0001, valid_dataset=None, restart=False):
+    def trainModel(dataset, n_epochs=20, batch_size=16, learning_rate=0.0001, valid_dataset=None):
         """
         -- Entrainement du réseau. Reprend l'apprentissage
         depuis le modèle le plus avancé retrouvé dans Paths/WaveUNet/
@@ -145,8 +145,6 @@ class WaveUNet(nn.Module):
         """
 
         # gestion des fichiers de modèles enregistrés
-        if restart : os.rmdir(PATH)
-
         os.makedirs(PATH, exist_ok=True)
 
         model_files = os.listdir(PATH)
@@ -158,7 +156,7 @@ class WaveUNet(nn.Module):
             last_saved_epoch = max(saved_epochs)
             model.load_state_dict(torch.load(os.path.join(PATH, f'model_{last_saved_epoch}.pth')))
 
-        if os.path.exists(SCORES_PATH + 'WaveUNetMSE.csv') and not(restart): 
+        if os.path.exists(SCORES_PATH + 'WaveUNetMSE.csv') : 
             scores = pd.read_csv(SCORES_PATH + 'WaveUNetMSE.csv')
             scores = scores.loc[scores.index < last_saved_epoch]
         else : 
