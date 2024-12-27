@@ -32,7 +32,7 @@ class Audiodataset(Dataset):
     def __init__(self, set='train_small', spectrogram=False, snr_filter=None, resample_n_points=None, padding=False, getitem='all'):
         
         # Chemin vers le jeu de données chargé
-        self.root_dir = 'Data/' + set
+        self.root_dir = os.path.join('Data', set)
         samples = os.listdir(self.root_dir)
 
         # Propriétés
@@ -53,10 +53,10 @@ class Audiodataset(Dataset):
             sample_path = os.path.join(self.root_dir, sample)
             for file in os.listdir(sample_path) :
                 if file.startswith('mix_snr_') : 
-                    input_file = str(os.path.join(sample_path, file))
+                    input_file = os.path.normpath(os.path.join(sample_path, file))
                     snr = int(file.split('.')[0].split('_')[-1])
-                elif file == "noise.wav" : noise_file = str(os.path.join(sample_path, file))
-                elif file == "voice.wav" : voice_file = str(os.path.join(sample_path, file))
+                elif file == "noise.wav" : noise_file = os.path.normpath(os.path.join(sample_path, file))
+                elif file == "voice.wav" : voice_file = os.path.normpath(os.path.join(sample_path, file))
 
             if self.__snr_filter == None or self.__snr_filter == snr :
                 sample_dic = {
