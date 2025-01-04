@@ -13,15 +13,15 @@ import random
 
 
 # chemin vers l'enregistrement des modèles entrainés/scores obtenus
-PATH = "Paths/UNet/"
-SCORES_PATH = "Scores/UNet/"
+PATH_2 = "Paths/UNet2/"
+SCORES_PATH_2 = "Scores/UNet2/"
 
 # Recherche du GPU
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 in_channels=1
 
-out_channels=1
+out_channels=2
 
 features=[16, 32, 64, 128, 256] # nombre des blocks
 
@@ -63,15 +63,15 @@ class DecodeBlock(nn.Module):
     
 # ****************************************
 # *                                      *
-# *             UNET                     *
+# *             UNET2                    *
 # *                                      *
 # ****************************************
 
-class UNet(nn.Module):
+class UNet2(nn.Module):
     def __init__(
             self, in_channels=in_channels, out_channels=out_channels, features=features,
     ):
-        super(UNet, self).__init__()
+        super(UNet2, self).__init__()
         self.ups = nn.ModuleList()
         self.downs = nn.ModuleList()
 
@@ -118,32 +118,31 @@ class UNet(nn.Module):
         return mask 
 
     @staticmethod
-    def trainModel(dataset, data_type='Voice', n_epochs=20, batch_size=16, learning_rate=0.001, valid_dataset=None):
+    def trainModel(dataset, n_epochs=20, batch_size=16, learning_rate=0.001, valid_dataset=None):
         """
         Train the UNet model with optional resumption and validation.
 
         Args:
             dataset: Training dataset.
-            data_type: type of signal to learn (default: 'voice').
             n_epochs: Number of epochs to train (default: 20).
             batch_size: Batch size (default: 16).
-            learning_rate: Initial learning rate (default: 0.0001).
+            learning_rate: Initial learning rate (default: 0.001).
             valid_dataset: Validation dataset (optional).
 
         Returns:
             model: Trained UNet model.
             losses: List of training losses.
         """
-        os.makedirs(PATH, exist_ok=True)
-        os.makedirs(SCORES_PATH, exist_ok=True)
-        score_path = os.path.join(SCORES_PATH, data_type)
+        os.makedirs(PATH_2, exist_ok=True)
+        os.makedirs(SCORES_PATH_2, exist_ok=True)
+        score_path = os.path.join(SCORES_PATH_2)
         
         os.makedirs(score_path, exist_ok=True)
-        model_path = os.path.join(PATH, data_type)
+        model_path = os.path.join(PATH_2)
         os.makedirs(model_path, exist_ok=True)
         
         model_files = [f for f in os.listdir(model_path) if f.endswith('.pth')]
-        model = UNet().to(device)
+        model = UNet2().to(device)
         last_saved_epoch = 0
 
         print(model_files)
@@ -151,9 +150,9 @@ class UNet(nn.Module):
         if len(model_files) > 0:
             saved_epochs = [int(i.split('.')[0].split('_')[-1]) for i in model_files]
             last_saved_epoch = max(saved_epochs)
-            model.load_state_dict(torch.load(os.path.join(PATH, data_type, f'model_{last_saved_epoch}.pth')))
+            model.load_state_dict(torch.load(os.path.join(PATH, f'model_{last_saved_epoch}.pth')))
 
-        csv_path = os.path.join(SCORES_PATH, data_type, 'UNetMAE.csv')
+        csv_path = os.path.join(SCORES_PATH, 'UNet2MAE.csv')
         if os.path.exists(csv_path):
             scores = pd.read_csv(csv_path)
             scores = scores.loc[scores.index < last_saved_epoch]
@@ -171,11 +170,16 @@ class UNet(nn.Module):
             model.train()
             running_loss = 0.0
 
-            for X, Y in tqdm(dataloader):
-                X, Y = X.to(device), Y.to(device)
+            for X, voice, noise, _, _ in tqdm(dataloader):
+                X, voice,noise = X.to(device), voice.to(device), noise.to(device)
                 optimizer.zero_grad()
                 output = model(X.unsqueeze(1))
-                loss = criterion(output * Y.unsqueeze(1),Y.unsqueeze(1))
+                
+                voice_ = voice.unsqueeze(1)
+                noise_ = noise.unsqueeze(1)
+                Y = torch.cat((voice_, noise_), dim=1)  # Concatenate along the channel dimension
+
+                loss = criterion(output * Y,Y)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
@@ -189,10 +193,17 @@ class UNet(nn.Module):
                 model.eval()
                 running_valid_loss = 0.0
                 with torch.no_grad():
-                    for X, Y in valid_dataloader:
-                        X, Y = X.to(device), Y.to(device)
-                        output = model(X.unsqueeze(1))  # Add channel dimension
-                        loss = criterion(output * Y.unsqueeze(1), Y.unsqueeze(1))  # Add channel dimension for target
+                    for X, voice, noise, _, _  in valid_dataloader:
+
+                        X, voice,noise = X.to(device), voice.to(device), noise.to(device)
+                        optimizer.zero_grad()
+                        output = model(X.unsqueeze(1))
+                        
+                        voice_ = voice.unsqueeze(1)
+                        noise_ = noise.unsqueeze(1)
+                        Y = torch.cat((voice_, noise_), dim=1)  # Concatenate along the channel dimension
+
+                        loss = criterion(output * Y, Y)  # Add channel dimension for target
                         running_valid_loss += loss.item()
 
                 valid_loss = running_valid_loss / len(valid_dataloader)
@@ -202,7 +213,7 @@ class UNet(nn.Module):
 
             # Save model
             if (epoch + 1) % 10 == 0 or (epoch + 1) == (last_saved_epoch + n_epochs):
-                torch.save(model.state_dict(), os.path.join(PATH, data_type, f'model_{epoch + 1}.pth'))
+                torch.save(model.state_dict(), os.path.join(PATH_2, f'model_{epoch + 1}.pth'))
 
         valid_losses = valid_losses if valid_losses != [] else np.nan
         scores = pd.concat([scores, pd.DataFrame({
@@ -210,11 +221,12 @@ class UNet(nn.Module):
             'valid': valid_losses
         })])
 
-        csv_path = os.path.join(SCORES_PATH, data_type, 'UNetMAE.csv')
+        csv_path = os.path.join(SCORES_PATH_2, 'UNet2MAE.csv')
         scores.to_csv(csv_path, index=False)
 
         return model, losses
-
+    
+    
     @staticmethod
     def compute_metrics(target_waveform, reconstructed_waveform, mixture_waveform):
         """
@@ -242,9 +254,9 @@ class UNet(nn.Module):
         nsdr = sdr - original_sdr
     
         return {'SDR': sdr[0], 'SIR': sir[0], 'SAR': sar[0], 'NSDR': nsdr[0]}
-
+    
     @staticmethod
-    def validateModel(voice_model, noise_model, valid_dataset,subset_size=200):
+    def validateModel(model, valid_dataset,subset_size=200):
         """
         Validate the models and return raw metrics data for visualization (box plot).
     
@@ -256,13 +268,12 @@ class UNet(nn.Module):
         Returns:
             metrics_data: Dictionary containing lists of metric values for each sample in the validation set.
         """
-        voice_model.eval()
-        noise_model.eval()
+        model.eval()
     
         sdr_list, sir_list, sar_list, nsdr_list = [], [], [], []
     
         dataset_indices = random.sample(range(len(valid_dataset)), min(subset_size, len(valid_dataset)))
-
+    
         with torch.no_grad():
             for dataset_idx in tqdm(range(len(dataset_indices)), desc="Validation Progress"):
                 X, voice, noise, _, _ = valid_dataset[dataset_idx]
@@ -270,9 +281,13 @@ class UNet(nn.Module):
                 X_ = X.unsqueeze(0).unsqueeze(0)
                 voice_ = voice.unsqueeze(0).unsqueeze(0)
                 noise_ = noise.unsqueeze(0).unsqueeze(0)
+
+                Y = torch.cat((voice_, noise_), dim=1)  # Concatenate along the channel dimension
                 
-                voice_pred = (voice_model(X_)* voice_).squeeze()
-                noise_pred = (noise_model(X_)* noise_).squeeze()
+                pred = (voice_model(X_) * Y).squeeze()
+                
+                voice_pred = pred[0]
+                noise_pred = pred[1]
     
                 reconstructed_voice = valid_dataset.reconstruct(
                     voice_pred.cpu(), id0=dataset_idx, reference="voice"
@@ -315,7 +330,7 @@ class UNet(nn.Module):
             'SAR': sar_list,
         })
     
-        csv_path = os.path.join(SCORES_PATH, 'val_metrics.csv')
+        csv_path = os.path.join(SCORES_PATH_2, 'val_metrics.csv')
         metrics_data.to_csv(csv_path, index=False)
     
         return metrics_data
