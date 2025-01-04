@@ -135,7 +135,6 @@ class WaveUNet(nn.Module):
             * batch_size : taille de batch des données
             * learning_rate : taux d'apprentissage initial
             * valid_dataset (optionnel) : jeu de validation pour évaluer le surapprentissage simultanément
-            * restart : False par défaut. Si True, supprime les fichiers préenregistrés du repertoire Paths/WaveUNet et redémarre l'apprentissage à l'initialisation
 
         << OUT : 
             * référence vers le modèle à l'état final
