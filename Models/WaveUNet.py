@@ -7,6 +7,7 @@ import torch
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import mir_eval
 
 # chemin vers l'enregistrement des modèles entrainés/scores obtenus
 PATH = "Paths/WaveUNet/"
@@ -17,7 +18,7 @@ device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 L = 12     # Nombre de blocs encodeur/decodeur
 Fc = 24    # Filtres/layer
-fd = 15    # Noyau d'encodeur
+fd = 15    # Noyau encodeur
 fu = 5     # Noyau decodeur
 
 
@@ -230,3 +231,31 @@ class WaveUNet(nn.Module):
         scores.to_csv(SCORES_PATH + 'WaveUNetMSE.csv', index=False)
 
         return model, losses
+    
+    @staticmethod
+    def compute_metrics(target_waveform, reconstructed_waveform, mixture_waveform):
+        """
+        Compute SDR, SIR, SAR, and NSDR metrics using mir_eval.
+        
+        Args:
+            target_waveform (np.ndarray): The target signal.
+            reconstructed_waveform (np.ndarray): The output signal from the model.
+            mixture_waveform (np.ndarray): The original mixture.
+        
+        Returns:
+            dict: A dictionary with 'SDR', 'SIR', 'SAR', 'NSDR' metrics.
+        """
+        # Compute SDR, SIR, SAR using mir_eval
+        sdr, sir, sar, _ = mir_eval.separation.bss_eval_sources(
+            target_waveform,  # Targets (2D)
+            reconstructed_waveform  # Estimated signals (2D)
+        )
+    
+        # Compute NSDR (Normalized SDR)
+        original_sdr = mir_eval.separation.bss_eval_sources(
+            target_waveform,
+            mixture_waveform
+        )[0]
+        nsdr = sdr - original_sdr
+    
+        return {'SDR': sdr[0], 'SIR': sir[0], 'SAR': sar[0], 'NSDR': nsdr[0]}

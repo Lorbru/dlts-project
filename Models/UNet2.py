@@ -20,7 +20,6 @@ SCORES_PATH_2 = "Scores/UNet2/"
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 in_channels=1
-
 out_channels=2
 
 features=[16, 32, 64, 128, 256] # nombre des blocks
@@ -145,14 +144,12 @@ class UNet2(nn.Module):
         model = UNet2().to(device)
         last_saved_epoch = 0
 
-        print(model_files)
-
         if len(model_files) > 0:
             saved_epochs = [int(i.split('.')[0].split('_')[-1]) for i in model_files]
             last_saved_epoch = max(saved_epochs)
-            model.load_state_dict(torch.load(os.path.join(PATH, f'model_{last_saved_epoch}.pth')))
+            model.load_state_dict(torch.load(os.path.join(PATH_2, f'model_{last_saved_epoch}.pth')))
 
-        csv_path = os.path.join(SCORES_PATH, 'UNet2MAE.csv')
+        csv_path = os.path.join(SCORES_PATH_2, 'UNet2MAE.csv')
         if os.path.exists(csv_path):
             scores = pd.read_csv(csv_path)
             scores = scores.loc[scores.index < last_saved_epoch]
@@ -171,7 +168,8 @@ class UNet2(nn.Module):
             running_loss = 0.0
 
             for X, voice, noise, _, _ in tqdm(dataloader):
-                X, voice,noise = X.to(device), voice.to(device), noise.to(device)
+      
+                X, voice, noise = X.to(device), voice.to(device), noise.to(device)
                 optimizer.zero_grad()
                 output = model(X.unsqueeze(1))
                 
@@ -179,7 +177,7 @@ class UNet2(nn.Module):
                 noise_ = noise.unsqueeze(1)
                 Y = torch.cat((voice_, noise_), dim=1)  # Concatenate along the channel dimension
 
-                loss = criterion(output * Y,Y)
+                loss = criterion(output * Y, Y)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()

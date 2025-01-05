@@ -32,7 +32,6 @@ features=[16, 32, 64, 128, 256] # nombre des blocks
 # *                                      *
 # ****************************************
 
-
 class EncodeBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(EncodeBlock, self).__init__()
