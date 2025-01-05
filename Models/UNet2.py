@@ -10,11 +10,13 @@ import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import random
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 # chemin vers l'enregistrement des modèles entrainés/scores obtenus
 PATH_2 = "Paths/UNet2/"
 SCORES_PATH_2 = "Scores/UNet2/"
+
 
 # Recherche du GPU
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -23,7 +25,7 @@ in_channels=1
 
 out_channels=2
 
-features=[16, 32, 64, 128, 256] # nombre des blocks
+features=[16, 32, 64, 128, 256, 512] # nombre des blocks
 
 
 # ****************************************
@@ -45,14 +47,15 @@ class EncodeBlock(nn.Module):
         return self.conv(x)
     
 class DecodeBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, drop_out=True):
+    def __init__(self, in_channels, out_channels, drop_out=True, final = False):
         super(DecodeBlock, self).__init__()
         layers = [
             nn.ConvTranspose2d(in_channels, out_channels, kernel_size=5, stride=2, padding=2),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
         ]
-        
+        if (final == False):
+            layers.append(nn.ReLU(inplace=True))
+            
         if drop_out: 
             layers.append(nn.Dropout(0.5))
             
@@ -89,7 +92,11 @@ class UNet2(nn.Module):
         for feature in reversed(features[:-1]):
             self.ups.append(DecodeBlock(feature*4, feature, drop_out = (feature >= 64)))
 
-        self.final_conv = DecodeBlock(features[0]*2, out_channels)
+        self.final_conv = nn.Sequential(
+            DecodeBlock(features[0]*2, out_channels, drop_out = False, final = True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=1),
+            nn.Sigmoid()  
+        )
 
     def forward(self, x):
         input_x = x
@@ -114,11 +121,10 @@ class UNet2(nn.Module):
         if x.shape != input_x.shape:
                 x = TF.resize(x, size=input_x.shape[2:])
 
-        mask = torch.sigmoid(x)
-        return mask 
+        return x 
 
     @staticmethod
-    def trainModel(dataset, n_epochs=20, batch_size=16, learning_rate=0.001, valid_dataset=None):
+    def trainModel(dataset, n_epochs=20, batch_size=16, learning_rate=0.001, valid_dataset=None,schedule = False):
         """
         Train the UNet model with optional resumption and validation.
 
@@ -162,6 +168,7 @@ class UNet2(nn.Module):
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         criterion = nn.L1Loss(reduction='mean').to(device)
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5, min_lr=1e-7)
 
         losses, valid_losses = [], []
         valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=4, pin_memory=True) if valid_dataset else None
@@ -179,14 +186,14 @@ class UNet2(nn.Module):
                 noise_ = noise.unsqueeze(1)
                 Y = torch.cat((voice_, noise_), dim=1)  # Concatenate along the channel dimension
 
-                loss = criterion(output * Y,Y)
+                loss = criterion(output * X.unsqueeze(1),Y)
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item()
 
             epoch_loss = running_loss / len(dataloader)
             losses.append(epoch_loss)
-            print(f'Epoch {epoch + 1}/{last_saved_epoch + n_epochs} - Train Loss: {epoch_loss:.4f}')
+            print(f'Epoch {epoch + 1}/{last_saved_epoch + n_epochs} - Train Loss: {epoch_loss:.7f}')
 
             # Validation loss
             if valid_dataloader:
@@ -203,12 +210,19 @@ class UNet2(nn.Module):
                         noise_ = noise.unsqueeze(1)
                         Y = torch.cat((voice_, noise_), dim=1)  # Concatenate along the channel dimension
 
-                        loss = criterion(output * Y, Y)  # Add channel dimension for target
+                        loss = criterion(output * X.unsqueeze(1), Y)  # Add channel dimension for target
                         running_valid_loss += loss.item()
 
                 valid_loss = running_valid_loss / len(valid_dataloader)
                 valid_losses.append(valid_loss)
-                print(f'Valid Loss: {valid_loss:.4f}')
+                print(f'Valid Loss: {valid_loss:.7f}')
+                if schedule:
+                    learning_rate = optimizer.param_groups[0]['lr']
+                    scheduler.step(valid_loss)  # Update learning rate based on validation loss
+                    if (optimizer.param_groups[0]['lr'] != learning_rate):
+                        print(f"Scheduler stepped. New Learning Rate: {optimizer.param_groups[0]['lr']:.7f}")
+                        learning_rate = optimizer.param_groups[0]['lr']
+                        
 
 
             # Save model
@@ -230,35 +244,40 @@ class UNet2(nn.Module):
     @staticmethod
     def compute_metrics(target_waveform, reconstructed_waveform, mixture_waveform):
         """
-        Compute SDR, SIR, SAR, and NSDR metrics using mir_eval.
+        Compute SDR, SIR, SAR, and NSDR metrics using mir_eval for both signals (voice and noise).
         
         Args:
-            target_waveform (np.ndarray): The target signal.
-            reconstructed_waveform (np.ndarray): The output signal from the model.
-            mixture_waveform (np.ndarray): The original mixture.
+            target_waveform (np.ndarray): The target signals (2D: [2, time]).
+            reconstructed_waveform (np.ndarray): The output signals from the model (2D: [2, time]).
+            mixture_waveform (np.ndarray): The original mixture signal (2D: [2, time]).
         
         Returns:
-            dict: A dictionary with 'SDR', 'SIR', 'SAR', 'NSDR' metrics.
+            dict: A dictionary with metrics for both 'voice' and 'noise':
+                  - 'voice': {'SDR', 'SIR', 'SAR', 'NSDR'}
+                  - 'noise': {'SDR', 'SIR', 'SAR', 'NSDR'}
         """
-        # Compute SDR, SIR, SAR using mir_eval
+        # Compute SDR, SIR, SAR for both signals
         sdr, sir, sar, _ = mir_eval.separation.bss_eval_sources(
             target_waveform,  # Targets (2D)
             reconstructed_waveform  # Estimated signals (2D)
         )
-    
-        # Compute NSDR (Normalized SDR)
-        original_sdr = mir_eval.separation.bss_eval_sources(
+        
+        # Compute NSDR (Normalized SDR) for both signals
+        original_sdr, _, _, _ = mir_eval.separation.bss_eval_sources(
             target_waveform,
             mixture_waveform
-        )[0]
+        )
         nsdr = sdr - original_sdr
-    
-        return {'SDR': sdr[0], 'SIR': sir[0], 'SAR': sar[0], 'NSDR': nsdr[0]}
-    
+        
+        return {
+            'voice': {'SDR': sdr[0], 'SIR': sir[0], 'SAR': sar[0], 'NSDR': nsdr[0]},
+            'noise': {'SDR': sdr[1], 'SIR': sir[1], 'SAR': sar[1], 'NSDR': nsdr[1]}
+        }
     @staticmethod
     def validateModel(model, valid_dataset,subset_size=200):
         """
-        Validate the models and return raw metrics data for visualization (box plot).
+        Validate the models and return raw metrics data for visualization (box plot),
+        grouped by SNR and by signal (voice and noise).
     
         Args:
             voice_model: Trained voice separation model.
@@ -266,71 +285,104 @@ class UNet2(nn.Module):
             valid_dataset: Validation dataset.
     
         Returns:
-            metrics_data: Dictionary containing lists of metric values for each sample in the validation set.
+            metrics_by_snr: Dictionary containing metrics for each SNR and each signal.
         """
         model.eval()
+
+        snr_groups = {}
+        for idx in range(len(valid_dataset)):
+            _, _, _, snr, _ = valid_dataset[idx]
+            if snr not in snr_groups:
+                snr_groups[snr] = []
+            snr_groups[snr].append(idx)
     
-        sdr_list, sir_list, sar_list, nsdr_list = [], [], [], []
+        subset_size_per_snr = min(subset_size, *[len(indices) for indices in snr_groups.values()])
+    
+        sampled_indices_by_snr = {}
+        for snr, indices in snr_groups.items():
+            sampled_indices_by_snr[snr] = random.sample(indices, subset_size_per_snr)
+        
+        print("Subsets created")
+    
+        metrics_by_snr = {}
     
         dataset_indices = random.sample(range(len(valid_dataset)), min(subset_size, len(valid_dataset)))
     
         with torch.no_grad():
-            for dataset_idx in tqdm(range(len(dataset_indices)), desc="Validation Progress"):
-                X, voice, noise, _, _ = valid_dataset[dataset_idx]
-                X, voice, noise  = X.to(device), voice.to(device), noise.to(device)
-                X_ = X.unsqueeze(0).unsqueeze(0)
-                voice_ = voice.unsqueeze(0).unsqueeze(0)
-                noise_ = noise.unsqueeze(0).unsqueeze(0)
-
-                Y = torch.cat((voice_, noise_), dim=1)  # Concatenate along the channel dimension
+            for snr, sampled_indices in sampled_indices_by_snr.items():
+                voice_sdr_list, voice_sir_list, voice_sar_list, voice_nsdr_list = [], [], [], []
+                noise_sdr_list, noise_sir_list, noise_sar_list, noise_nsdr_list = [], [], [], []
+    
+                for dataset_idx in tqdm(sampled_indices, desc=f"Validation Progress (SNR={snr})"):
+                    X, voice, noise, _, _ = valid_dataset[dataset_idx]
+                    X, voice, noise = X.to(device), voice.to(device), noise.to(device)
+                    X_ = X.unsqueeze(0).unsqueeze(0)
                 
-                pred = (voice_model(X_) * Y).squeeze()
+                    pred = (model(X_) * X_).squeeze()
                 
-                voice_pred = pred[0]
-                noise_pred = pred[1]
+                    voice_pred = pred[0].squeeze()
+                    noise_pred = pred[1].squeeze()
+                    
+                    reconstructed_voice = valid_dataset.reconstruct(
+                        voice_pred.cpu(), id0=dataset_idx, reference="voice"
+                    ).numpy().squeeze()
+                    target_voice = valid_dataset.reconstruct(
+                        voice.cpu(), id0=dataset_idx, reference="voice"
+                    ).numpy().squeeze()
+        
+                    reconstructed_noise = valid_dataset.reconstruct(
+                        noise_pred.cpu(), id0=dataset_idx, reference="noise"
+                    ).numpy().squeeze()
+                    target_noise = valid_dataset.reconstruct(
+                        noise.cpu(), id0=dataset_idx, reference="noise"
+                    ).numpy().squeeze()
+        
+                    target_waveform = np.array([target_voice, target_noise])
+                    reconstructed_waveform = np.array([reconstructed_voice, reconstructed_noise])
+                    
+                    mixture_waveform = valid_dataset.reconstruct(
+                        X.cpu(), id0=dataset_idx, reference='input'
+                    ).numpy().squeeze()
+                    
+                    mixture_waveform_ = np.array([mixture_waveform, mixture_waveform])
     
-                reconstructed_voice = valid_dataset.reconstruct(
-                    voice_pred.cpu(), id0=dataset_idx, reference="voice"
-                ).numpy().squeeze()
-                target_voice = valid_dataset.reconstruct(
-                    voice.cpu(), id0=dataset_idx, reference="voice"
-                ).numpy().squeeze()
-    
-                reconstructed_noise = valid_dataset.reconstruct(
-                    noise_pred.cpu(), id0=dataset_idx, reference="noise"
-                ).numpy().squeeze()
-                target_noise = valid_dataset.reconstruct(
-                    noise.cpu(), id0=dataset_idx, reference="noise"
-                ).numpy().squeeze()
-    
-                target_waveform = np.array([target_voice, target_noise])
-                reconstructed_waveform = np.array([reconstructed_voice, reconstructed_noise])
+                    metrics = UNet2.compute_metrics(
+                        target_waveform,
+                        reconstructed_waveform,
+                        mixture_waveform_
+                    )
                 
-                mixture_waveform = valid_dataset.reconstruct(
-                    X.cpu(), id0=dataset_idx, reference='input'
-                ).numpy().squeeze()
-                
-                mixture_waveform_ = np.array([mixture_waveform, mixture_waveform])
+                    # Stocker les métriques pour voice
+                    voice_sdr_list.append(metrics['voice']['SDR'])
+                    voice_sir_list.append(metrics['voice']['SIR'])
+                    voice_sar_list.append(metrics['voice']['SAR'])
+                    voice_nsdr_list.append(metrics['voice']['NSDR'])
     
-                metrics = compute_metrics(
-                    target_waveform,
-                    reconstructed_waveform,
-                    mixture_waveform_
-                )
-                
-                sdr_list.append(metrics['SDR'])
-                nsdr_list.append(metrics['NSDR'])
-                sir_list.append(metrics['SIR'])
-                sar_list.append(metrics['SAR'])
+                    # Stocker les métriques pour noise
+                    noise_sdr_list.append(metrics['noise']['SDR'])
+                    noise_sir_list.append(metrics['noise']['SIR'])
+                    noise_sar_list.append(metrics['noise']['SAR'])
+                    noise_nsdr_list.append(metrics['noise']['NSDR'])
     
-        metrics_data = pd.DataFrame({
-            'SDR': sdr_list,
-            'NSDR': nsdr_list,
-            'SIR': sir_list,
-            'SAR': sar_list,
-        })
+                # Stocker les métriques pour ce SNR
+                metrics_by_snr[snr] = {
+                    'voice': pd.DataFrame({
+                        'SDR': voice_sdr_list,
+                        'NSDR': voice_nsdr_list,
+                        'SIR': voice_sir_list,
+                        'SAR': voice_sar_list,
+                    }),
+                    'noise': pd.DataFrame({
+                        'SDR': noise_sdr_list,
+                        'NSDR': noise_nsdr_list,
+                        'SIR': noise_sir_list,
+                        'SAR': noise_sar_list,
+                    }),
+                }
     
-        csv_path = os.path.join(SCORES_PATH_2, 'val_metrics.csv')
-        metrics_data.to_csv(csv_path, index=False)
+        # Sauvegarder chaque DataFrame par SNR et par signal
+        for snr, metrics in metrics_by_snr.items():
+            metrics['voice'].to_csv(os.path.join(SCORES_PATH_2, f'val_metrics_SNR_{snr}_voice.csv'), index=False)
+            metrics['noise'].to_csv(os.path.join(SCORES_PATH_2, f'val_metrics_SNR_{snr}_noise.csv'), index=False)
     
-        return metrics_data
+        return metrics_by_snr
