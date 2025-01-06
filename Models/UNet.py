@@ -17,8 +17,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 PATH = "Paths/UNet/"
 SCORES_PATH = "Scores/UNet/"
 
-# Recherche du GPU
-device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 in_channels=1
 
@@ -140,6 +138,8 @@ class UNet(nn.Module):
             model: Trained UNet model.
             losses: List of training losses.
         """
+        device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
         os.makedirs(PATH, exist_ok=True)
         os.makedirs(SCORES_PATH, exist_ok=True)
         score_path = os.path.join(SCORES_PATH, data_type)
@@ -277,6 +277,8 @@ class UNet(nn.Module):
         Returns:
             metrics_by_snr: Dictionary containing metrics for each SNR and each signal.
         """
+        device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
         voice_model.eval()
         noise_model.eval()
     

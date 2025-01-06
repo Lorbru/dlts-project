@@ -25,7 +25,6 @@ depth_conv_kernel=3
 stacks=3
 layers=4
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
 PATH = 'Paths/TasNet/'
 SCORES_PATH = 'Scores/TasNet/'
 
@@ -190,6 +189,8 @@ class ConvTasNet(nn.Module):
             + Mise à jour des scores, Scores/WaveUNet/WaveUNetMSE.csv
         """
 
+        device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
         # gestion des fichiers de modèles enregistrés
         os.makedirs(PATH, exist_ok=True)
 
@@ -209,7 +210,7 @@ class ConvTasNet(nn.Module):
             scores = pd.DataFrame(columns=['train', 'valid'])
 
         # entrainement
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         
