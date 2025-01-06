@@ -163,7 +163,7 @@ class WaveUNet(nn.Module):
             scores = pd.DataFrame(columns=['train', 'valid'])
 
         # entrainement
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         
@@ -172,7 +172,7 @@ class WaveUNet(nn.Module):
         losses = []
         valid_losses = []
         
-        if valid_dataset != None : valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size)
+        if valid_dataset != None : valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
 
         for epoch in range(last_saved_epoch, last_saved_epoch + n_epochs):
             
@@ -232,30 +232,3 @@ class WaveUNet(nn.Module):
 
         return model, losses
     
-    @staticmethod
-    def compute_metrics(target_waveform, reconstructed_waveform, mixture_waveform):
-        """
-        Compute SDR, SIR, SAR, and NSDR metrics using mir_eval.
-        
-        Args:
-            target_waveform (np.ndarray): The target signal.
-            reconstructed_waveform (np.ndarray): The output signal from the model.
-            mixture_waveform (np.ndarray): The original mixture.
-        
-        Returns:
-            dict: A dictionary with 'SDR', 'SIR', 'SAR', 'NSDR' metrics.
-        """
-        # Compute SDR, SIR, SAR using mir_eval
-        sdr, sir, sar, _ = mir_eval.separation.bss_eval_sources(
-            target_waveform,  # Targets (2D)
-            reconstructed_waveform  # Estimated signals (2D)
-        )
-    
-        # Compute NSDR (Normalized SDR)
-        original_sdr = mir_eval.separation.bss_eval_sources(
-            target_waveform,
-            mixture_waveform
-        )[0]
-        nsdr = sdr - original_sdr
-    
-        return {'SDR': sdr[0], 'SIR': sir[0], 'SAR': sar[0], 'NSDR': nsdr[0]}
