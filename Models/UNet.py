@@ -313,14 +313,14 @@ class UNet(nn.Module):
                     noise_pred = (noise_model(X_) * X_).squeeze()
     
                     reconstructed_voice = valid_dataset.reconstruct(
-                        voice_pred.cpu(), id0=dataset_idx, reference="voice"
+                        voice_pred.cpu(), id0=dataset_idx, reference="input"
                     ).numpy().squeeze()
                     target_voice = valid_dataset.reconstruct(
                         voice.cpu(), id0=dataset_idx, reference="voice"
                     ).numpy().squeeze()
     
                     reconstructed_noise = valid_dataset.reconstruct(
-                        noise_pred.cpu(), id0=dataset_idx, reference="noise"
+                        noise_pred.cpu(), id0=dataset_idx, reference="input"
                     ).numpy().squeeze()
                     target_noise = valid_dataset.reconstruct(
                         noise.cpu(), id0=dataset_idx, reference="noise"
