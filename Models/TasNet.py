@@ -169,6 +169,26 @@ class ConvTasNet(nn.Module):
         output = self.decoder(output.view(B*self.output_dim, self.encode_dim, -1))
         return output[:,:,self.stride:-(r+self.stride)].contiguous().view(B, self.output_dim, -1)
     
+    def encode_viz(self, x):
+        
+        out, r = self.pad(x)
+        B = out.size(0)
+        return self.encoder(out)
+    
+    def masks_viz(self, x):
+
+        # padding + batch_size
+        out, r = self.pad(x)
+        B = out.size(0)
+
+        # encoder
+        enc_out = self.encoder(out)
+     
+        # masks generation
+        return self.separation(enc_out).view(B, self.output_dim, self.encode_dim, -1)
+
+
+    
     @staticmethod
     def trainModel(dataset, n_epochs=20, batch_size=16, learning_rate=0.001, valid_dataset=None):
         """

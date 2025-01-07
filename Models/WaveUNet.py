@@ -123,6 +123,22 @@ class WaveUNet(nn.Module):
         # final output
         return self.final(x, DSoutputs[0])         #    x:[B, K, T]
     
+    def latent_feature_viz(self, x):
+
+        with torch.no_grad():
+            DSoutputs = [x.clone()]                    # x:[B, 1, T]
+
+            # encoding
+            for i in range(self.L):                    # for i in range(1...L=12) :
+                x = self.DS[i](x)                      #     x:[B, 24*i, T_i]
+                DSoutputs.append(x.clone())            #     DS Block i:[B, 24*i, T_i]
+                x = x[:, :, ::2]                       #     x:[N, 24*i, T_i/2]  (Decimation)
+
+            x = self.latentConv(x)
+            return self.latentLeakRelu(x)
+
+
+
 
     @staticmethod
     def trainModel(dataset, n_epochs=20, batch_size=16, learning_rate=0.0001, valid_dataset=None):
